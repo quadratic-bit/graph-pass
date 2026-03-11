@@ -1,3 +1,4 @@
 *.ll
 *.out
 *.so
+*.tsv

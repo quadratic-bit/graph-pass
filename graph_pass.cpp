@@ -4,6 +4,9 @@
 #include <llvm/Passes/PassPlugin.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/bit.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/raw_ostream.h>
+
 
 #include <algorithm>
 #include <cstring>
@@ -11,6 +14,7 @@
 #include <vector>
 #include <cstdint>
 #include <unordered_map>
+#include <system_error>
 
 #define NODE_PREFIX "node"
 #define FONTNAME "fontname=\"DepartureMono Nerd Font\""
@@ -103,6 +107,94 @@ static StableIds collect_stable_ids(Module &M) {
 	return ids;
 }
 
+static string escape_manifest_field(StringRef field) {
+	string out;
+	out.reserve(field.size());
+
+	for (char c : field) {
+		switch (c) {
+
+		case '\\': out += "\\\\"; break;
+		case '\t': out += "\\t";  break;
+		case '\n': out += "\\n";  break;
+		case '\r': out += "\\r";  break;
+		default:   out += c;      break;
+
+		}
+	}
+
+	return out;
+}
+
+static void emit_manifest_header(raw_ostream &manifest, StringRef graph_name, StringRef source_path) {
+	manifest << "graphpass-manifest\t1\n";
+	manifest << "module\t"
+		<< escape_manifest_field(graph_name) << '\t'
+		<< escape_manifest_field(source_path) << '\n';
+}
+
+static void emit_manifest_function(
+	raw_ostream &manifest,
+	StableId function_id,
+	NodeId cluster_node_id,
+	StringRef function_name
+) {
+	manifest << "function\t"
+		<< function_id << '\t'
+		<< cluster_node_id << '\t'
+		<< escape_manifest_field(function_name) << '\n';
+}
+
+static void emit_manifest_bblock(
+	raw_ostream &manifest,
+	StableId bblock_id,
+	StableId function_id,
+	NodeId cluster_node_id,
+	StableId entry_instr_id,
+	StringRef bblock_name
+) {
+	manifest << "bblock\t"
+		<< bblock_id << '\t'
+		<< function_id << '\t'
+		<< cluster_node_id << '\t'
+		<< entry_instr_id << '\t'
+		<< escape_manifest_field(bblock_name) << '\n';
+}
+
+static void emit_manifest_instruction(
+	raw_ostream &manifest,
+	StableId instruction_id,
+	StableId bblock_id,
+	NodeId node_id,
+	StringRef opcode_name,
+	StringRef rendered_label
+) {
+	manifest << "instruction\t"
+		<< instruction_id << '\t'
+		<< bblock_id << '\t'
+		<< node_id << '\t'
+		<< escape_manifest_field(opcode_name) << '\t'
+		<< escape_manifest_field(rendered_label) << '\n';
+}
+
+static void emit_manifest_edge(
+	raw_ostream &manifest,
+	StableId edge_id,
+	StringRef edge_kind,
+	StableId from_instruction_id,
+	StableId to_instruction_id,
+	NodeId from_node_id,
+	NodeId to_node_id
+) {
+	manifest << "edge\t"
+		<< edge_id << '\t'
+		<< edge_kind << '\t'
+		<< from_instruction_id << '\t'
+		<< to_instruction_id << '\t'
+		<< from_node_id << '\t'
+		<< to_node_id << '\n';
+}
+
 static void emit_instr_node(NodeId nodeId, StringRef label) {
 	outs() << "\t\t" NODE_PREFIX << nodeId
 		<< " [label=\"" << label
@@ -168,10 +260,13 @@ static void strip_call_callee(Instruction &I, decltype(I.operands()) &operand_ra
 static void process_operand(
 		Use &Op,
 		Instruction &I,
+		StableId instr_id,
 		NodeId instr_node_id,
 		bool is_call,
 		ModuleSlotTracker &slot_tracker,
+		raw_ostream &manifest,
 		const StableIds &stable_ids,
+		StableId &next_edge_id,
 		StableId &next_synthetic_node_id,
 		vector<string> &call_args
 ) {
@@ -184,15 +279,37 @@ static void process_operand(
 	string operand_label = is_immediate ? "" : "%" + std::to_string(slot);
 
 	if (source_block) {
-		NodeId target_node_id = make_instr_node_id(stable_ids.instruction_id(&source_block->front()));
+		StableId target_instr_id = stable_ids.instruction_id(&source_block->front());
+		NodeId target_node_id = make_instr_node_id(target_instr_id);
+
 		emit_block_edge(instr_node_id, target_node_id);
+		emit_manifest_edge(
+			manifest,
+			next_edge_id++,
+			"block",
+			instr_id,
+			target_instr_id,
+			instr_node_id,
+			target_node_id
+		);
 		return;
 	}
 
 	if (source_instr) {
-		NodeId source_node_id = make_instr_node_id(stable_ids.instruction_id(source_instr));
+		StableId source_instr_id = stable_ids.instruction_id(source_instr);
+		NodeId source_node_id = make_instr_node_id(source_instr_id);
+
 		call_args.push_back(operand_label);
 		emit_data_edge(source_node_id, instr_node_id, operand_label);
+		emit_manifest_edge(
+			manifest,
+			next_edge_id++,
+			"data",
+			source_instr_id,
+			instr_id,
+			source_node_id,
+			instr_node_id
+		);
 		return;
 	}
 
@@ -216,14 +333,18 @@ static void process_operand(
 
 static NodeId emit_instruction(
 	Instruction &I,
+	StableId bblock_id,
 	ModuleSlotTracker &slot_tracker,
+	raw_ostream &manifest,
 	const StableIds &stable_ids,
+	StableId &next_edge_id,
 	StableId &next_synthetic_node_id
 ) {
 	auto operand_range = I.operands();
 	auto instruction_label = string(I.getOpcodeName());
 	bool is_call = strcmp(I.getOpcodeName(), "call") == 0;
-	NodeId instr_node_id = make_instr_node_id(stable_ids.instruction_id(&I));
+	StableId instr_id = stable_ids.instruction_id(&I);
+	NodeId instr_node_id = make_instr_node_id(instr_id);
 	auto next_instr = I.getNextNode();
 	NodeId next_node_id = next_instr
 		? make_instr_node_id(stable_ids.instruction_id(next_instr))
@@ -235,14 +356,45 @@ static NodeId emit_instruction(
 	vector<string> call_args;
 
 	for (auto &Op : operand_range) {
-		process_operand(Op, I, instr_node_id, is_call, slot_tracker, stable_ids, next_synthetic_node_id, call_args);
+		process_operand(
+			Op,
+			I,
+			instr_id,
+			instr_node_id,
+			is_call,
+			slot_tracker,
+			manifest,
+			stable_ids,
+			next_edge_id,
+			next_synthetic_node_id,
+			call_args
+		);
 	}
 
 	if (is_call) instruction_label += format_call_args(call_args);
 
 	emit_instr_node(instr_node_id, instruction_label);
+	emit_manifest_instruction(
+		manifest,
+		instr_id,
+		bblock_id,
+		instr_node_id,
+		I.getOpcodeName(),
+		instruction_label
+	);
 	if (next_node_id) {
+		StableId next_instr_id = stable_ids.instruction_id(next_instr);
+
 		emit_sequence_edge(instr_node_id, next_node_id);
+		emit_manifest_edge(
+			manifest,
+			next_edge_id++,
+			"seq",
+			instr_id,
+			next_instr_id,
+			instr_node_id,
+			next_node_id
+		);
 	}
 	return instr_node_id;
 }
@@ -264,19 +416,59 @@ struct GraphPass : public PassInfoMixin<GraphPass> {
 		ModuleSlotTracker slot_tracker(&M);
 
 		StableIds stable_ids = collect_stable_ids(M);
+		string manifest_path = filename + ".manifest.tsv";
+		std::error_code manifest_error;
+		raw_fd_ostream manifest(manifest_path, manifest_error, sys::fs::OF_Text);
+
+		if (manifest_error) {
+			errs() << "GraphPass: failed to open manifest file '"
+			       << manifest_path << "': "
+			       << manifest_error.message() << '\n';
+			return PreservedAnalyses::all();
+		}
+		StableId next_edge_id = 1;
 		StableId next_synthetic_node_id = 1;
 
 		outs() << "digraph " << filename << " {\n\trankdir=TB;\n\tdpi=300\n\tnode [shape=box];\n\tlabel=\"" << source_path << "\"\n\t" FONTNAME "\n";
+		emit_manifest_header(manifest, filename, source_path);
 		for (auto &F : M) {
 			slot_tracker.incorporateFunction(F);
 			outs() << '\n';
 
-			emit_function_cluster_begin(F, stable_ids.function_id(&F));
+			StableId function_id = stable_ids.function_id(&F);
+			emit_manifest_function(
+				manifest,
+				function_id,
+				make_function_cluster_id(function_id),
+				F.getName()
+			);
+			emit_function_cluster_begin(F, function_id);
 			for (auto &B : F) {
+				StableId bblock_id = stable_ids.bblock_id(&B);
+				StableId entry_instr_id = B.empty()
+					? 0
+					: stable_ids.instruction_id(&B.front());
+
+				emit_manifest_bblock(
+					manifest,
+					bblock_id,
+					function_id,
+					make_bblock_cluster_id(bblock_id),
+					entry_instr_id,
+					B.getName()
+				);
 				vector<NodeId> bblock_node_ids;
 
 				for (auto &I : B) {
-					NodeId instr_node_id = emit_instruction(I, slot_tracker, stable_ids, next_synthetic_node_id);
+					NodeId instr_node_id = emit_instruction(
+						I,
+						bblock_id,
+						slot_tracker,
+						manifest,
+						stable_ids,
+						next_edge_id,
+						next_synthetic_node_id
+					);
 					bblock_node_ids.push_back(instr_node_id);
 				}
 
@@ -285,6 +477,12 @@ struct GraphPass : public PassInfoMixin<GraphPass> {
 			emit_cluster_end(1);
 		}
 		outs() << "}\n";
+		manifest.close();
+		if (manifest.has_error()) {
+			errs() << "GraphPass: failed while writing manifest file '"
+			       << manifest_path << "'\n";
+			manifest.clear_error();
+		}
 		return PreservedAnalyses::all();
 	};
 };
