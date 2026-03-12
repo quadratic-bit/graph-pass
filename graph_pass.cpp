@@ -1,12 +1,14 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/ModuleSlotTracker.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/PassPlugin.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/bit.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
-
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
+#include <llvm/Transforms/Utils/ModuleUtils.h>
 
 #include <algorithm>
 #include <cstring>
@@ -107,6 +109,72 @@ static StableIds collect_stable_ids(Module &M) {
 	return ids;
 }
 
+struct CFGEdgeRef {
+	const BasicBlock *from;
+	const BasicBlock *to;
+
+	bool operator==(const CFGEdgeRef &other) const {
+		return from == other.from && to == other.to;
+	}
+};
+
+struct CFGEdgeRefHash {
+	size_t operator()(const CFGEdgeRef &edge) const {
+		return std::hash<const BasicBlock *>{}(edge.from) ^ (std::hash<const BasicBlock *>{}(edge.to) << 1);
+	}
+};
+
+struct RuntimeIds {
+	StableId module_id = 0;
+	StableId next_cfg_edge_id = 1;
+
+	std::unordered_map<CFGEdgeRef, StableId, CFGEdgeRefHash> cfg_edge_ids;
+
+	StableId cfg_edge_id(const BasicBlock *from, const BasicBlock *to) const {
+		return cfg_edge_ids.at({from, to});
+	}
+};
+
+static StableId hash_module_id(StringRef text) {
+	uint64_t hash = 14695981039346656037ull;
+
+	for (unsigned char c : text) {
+		hash ^= c;
+		hash *= 1099511628211ull;
+	}
+
+	return hash ? hash : 1;
+}
+
+static RuntimeIds collect_runtime_ids(Module &M) {
+	RuntimeIds ids;
+	StringRef module_key = M.getSourceFileName().empty()
+		? M.getModuleIdentifier()
+		: M.getSourceFileName();
+
+	ids.module_id = hash_module_id(module_key);
+
+	for (auto &F : M) {
+		if (F.isDeclaration()) continue;
+
+		for (auto &B : F) {
+			Instruction *terminator = B.getTerminator();
+			if (!terminator) continue;
+
+			for (unsigned i = 0; i < terminator->getNumSuccessors(); ++i) {
+				BasicBlock *successor = terminator->getSuccessor(i);
+				CFGEdgeRef edge{&B, successor};
+
+				if (ids.cfg_edge_ids.find(edge) == ids.cfg_edge_ids.end()) {
+					ids.cfg_edge_ids.emplace(edge, ids.next_cfg_edge_id++);
+				}
+			}
+		}
+	}
+
+	return ids;
+}
+
 static string escape_manifest_field(StringRef field) {
 	string out;
 	out.reserve(field.size());
@@ -126,9 +194,15 @@ static string escape_manifest_field(StringRef field) {
 	return out;
 }
 
-static void emit_manifest_header(raw_ostream &manifest, StringRef graph_name, StringRef source_path) {
+static void emit_manifest_header(
+	raw_ostream &manifest,
+	StableId module_id,
+	StringRef graph_name,
+	StringRef source_path
+) {
 	manifest << "graphpass-manifest\t1\n";
 	manifest << "module\t"
+		<< module_id << '\t'
 		<< escape_manifest_field(graph_name) << '\t'
 		<< escape_manifest_field(source_path) << '\n';
 }
@@ -193,6 +267,207 @@ static void emit_manifest_edge(
 		<< to_instruction_id << '\t'
 		<< from_node_id << '\t'
 		<< to_node_id << '\n';
+}
+
+static void emit_manifest_cfg_edge(
+	raw_ostream &manifest,
+	StableId edge_id,
+	StableId from_bblock_id,
+	StableId to_bblock_id,
+	StableId from_instr_id,
+	StableId to_instr_id,
+	NodeId from_node_id,
+	NodeId to_node_id
+) {
+	manifest << "cfg_edge\t"
+		<< edge_id << '\t'
+		<< from_bblock_id << '\t'
+		<< to_bblock_id << '\t'
+		<< from_instr_id << '\t'
+		<< to_instr_id << '\t'
+		<< from_node_id << '\t'
+		<< to_node_id << '\n';
+}
+
+static void emit_manifest_cfg_edges(
+	raw_ostream &manifest,
+	BasicBlock &B,
+	const StableIds &stable_ids,
+	const RuntimeIds &runtime_ids
+) {
+	Instruction *terminator = B.getTerminator();
+	if (!terminator) return;
+
+	StableId from_bblock_id = stable_ids.bblock_id(&B);
+	StableId from_instr_id = stable_ids.instruction_id(terminator);
+	NodeId from_node_id = make_instr_node_id(from_instr_id);
+
+	for (unsigned i = 0; i < terminator->getNumSuccessors(); ++i) {
+		BasicBlock *successor = terminator->getSuccessor(i);
+		StableId to_bblock_id = stable_ids.bblock_id(successor);
+		StableId to_instr_id = stable_ids.instruction_id(&successor->front());
+		NodeId to_node_id = make_instr_node_id(to_instr_id);
+
+		emit_manifest_cfg_edge(
+			manifest,
+			runtime_ids.cfg_edge_id(&B, successor),
+			from_bblock_id,
+			to_bblock_id,
+			from_instr_id,
+			to_instr_id,
+			from_node_id,
+			to_node_id
+		);
+	}
+}
+
+struct RuntimeLoggerFns {
+	FunctionCallee init;
+	FunctionCallee bb;
+	FunctionCallee edge;
+	FunctionCallee call;
+};
+
+static RuntimeLoggerFns declare_runtime_logger_fns(Module &M) {
+	LLVMContext &ctx = M.getContext();
+	Type *void_ty = Type::getVoidTy(ctx);
+	Type *i64_ty = Type::getInt64Ty(ctx);
+
+	return {
+		M.getOrInsertFunction("__graphpass_log_init", void_ty, i64_ty),
+		M.getOrInsertFunction("__graphpass_log_bb",   void_ty, i64_ty),
+		M.getOrInsertFunction("__graphpass_log_edge", void_ty, i64_ty),
+		M.getOrInsertFunction("__graphpass_log_call", void_ty, i64_ty)
+	};
+}
+
+static bool is_graphpass_runtime_function(const Function *F) {
+	if (!F) return false;
+
+	StringRef name = F->getName();
+	return name == "__graphpass_log_init"
+		|| name == "__graphpass_log_bb"
+		|| name == "__graphpass_log_edge"
+		|| name == "__graphpass_log_call"
+		|| name == "__graphpass_ctor";
+}
+
+static Function *create_runtime_log_ctor(
+	Module &M,
+	FunctionCallee log_init,
+	StableId module_id
+) {
+	LLVMContext &ctx = M.getContext();
+	FunctionType *ctor_ty = FunctionType::get(Type::getVoidTy(ctx), false);
+	Function *ctor = Function::Create(
+		ctor_ty,
+		GlobalValue::InternalLinkage,
+		"__graphpass_ctor",
+		M
+	);
+
+	BasicBlock *entry = BasicBlock::Create(ctx, "entry", ctor);
+	IRBuilder<> builder(entry);
+
+	builder.CreateCall(log_init, {builder.getInt64(module_id)});
+	builder.CreateRetVoid();
+
+	appendToGlobalCtors(M, ctor, 0);
+	return ctor;
+}
+
+static void instrument_basic_block_entries(
+	Function &F,
+	const StableIds &stable_ids,
+	FunctionCallee log_bb
+) {
+	for (auto &B : F) {
+		auto insert_it = B.getFirstInsertionPt();
+		if (insert_it == B.end()) continue;
+
+		IRBuilder<> builder(&*insert_it);
+		builder.CreateCall(log_bb, {builder.getInt64(stable_ids.bblock_id(&B))});
+	}
+}
+
+static void instrument_call_sites(
+	Function &F,
+	const StableIds &stable_ids,
+	FunctionCallee log_call
+) {
+	for (auto &B : F) {
+		for (Instruction &I : make_early_inc_range(B)) {
+			auto *CB = dyn_cast<CallBase>(&I);
+			if (!CB) continue;
+
+			if (Function *callee = CB->getCalledFunction()) {
+				if (callee->isIntrinsic()) continue;
+				if (is_graphpass_runtime_function(callee)) continue;
+			}
+
+			IRBuilder<> builder(CB);
+			builder.CreateCall(log_call, {builder.getInt64(stable_ids.instruction_id(&I))});
+		}
+	}
+}
+
+static void instrument_cfg_edges(
+	Function &F,
+	const RuntimeIds &runtime_ids,
+	FunctionCallee log_edge
+) {
+	vector<CFGEdgeRef> cfg_edges;
+
+	for (auto &B : F) {
+		Instruction *terminator = B.getTerminator();
+		if (!terminator) continue;
+
+		for (unsigned i = 0; i < terminator->getNumSuccessors(); ++i) {
+			CFGEdgeRef edge{&B, terminator->getSuccessor(i)};
+
+			if (std::find(cfg_edges.begin(), cfg_edges.end(), edge) == cfg_edges.end()) {
+				cfg_edges.push_back(edge);
+			}
+		}
+	}
+
+	for (const CFGEdgeRef &edge : cfg_edges) {
+		BasicBlock *from = const_cast<BasicBlock *>(edge.from);
+		BasicBlock *to = const_cast<BasicBlock *>(edge.to);
+		Instruction *terminator = from->getTerminator();
+		if (!terminator) continue;
+
+		BasicBlock *log_block = nullptr;
+
+		if (terminator->getNumSuccessors() == 1) {
+			log_block = from;
+		} else {
+			log_block = SplitEdge(from, to, nullptr, nullptr, nullptr, "__graphpass.edge");
+			if (!log_block) continue;
+		}
+
+		IRBuilder<> builder(log_block->getTerminator());
+		builder.CreateCall(log_edge, {builder.getInt64(runtime_ids.cfg_edge_id(edge.from, edge.to))});
+	}
+}
+
+static void instrument_runtime_logging(
+	Module &M,
+	const StableIds &stable_ids,
+	const RuntimeIds &runtime_ids
+) {
+	RuntimeLoggerFns logger_fns = declare_runtime_logger_fns(M);
+	Function *ctor = create_runtime_log_ctor(M, logger_fns.init, runtime_ids.module_id);
+
+	for (auto &F : M) {
+		if (F.isDeclaration()) continue;
+		if (&F == ctor) continue;
+		if (is_graphpass_runtime_function(&F)) continue;
+
+		instrument_basic_block_entries(F, stable_ids, logger_fns.bb);
+		instrument_call_sites(F, stable_ids, logger_fns.call);
+		instrument_cfg_edges(F, runtime_ids, logger_fns.edge);
+	}
 }
 
 static void emit_instr_node(NodeId nodeId, StringRef label) {
@@ -416,6 +691,7 @@ struct GraphPass : public PassInfoMixin<GraphPass> {
 		ModuleSlotTracker slot_tracker(&M);
 
 		StableIds stable_ids = collect_stable_ids(M);
+		RuntimeIds runtime_ids = collect_runtime_ids(M);
 		string manifest_path = filename + ".manifest.tsv";
 		std::error_code manifest_error;
 		raw_fd_ostream manifest(manifest_path, manifest_error, sys::fs::OF_Text);
@@ -430,7 +706,7 @@ struct GraphPass : public PassInfoMixin<GraphPass> {
 		StableId next_synthetic_node_id = 1;
 
 		outs() << "digraph " << filename << " {\n\trankdir=TB;\n\tdpi=300\n\tnode [shape=box];\n\tlabel=\"" << source_path << "\"\n\t" FONTNAME "\n";
-		emit_manifest_header(manifest, filename, source_path);
+		emit_manifest_header(manifest, runtime_ids.module_id, filename, source_path);
 		for (auto &F : M) {
 			slot_tracker.incorporateFunction(F);
 			outs() << '\n';
@@ -457,8 +733,9 @@ struct GraphPass : public PassInfoMixin<GraphPass> {
 					entry_instr_id,
 					B.getName()
 				);
-				vector<NodeId> bblock_node_ids;
+				emit_manifest_cfg_edges(manifest, B, stable_ids, runtime_ids);
 
+				vector<NodeId> bblock_node_ids;
 				for (auto &I : B) {
 					NodeId instr_node_id = emit_instruction(
 						I,
@@ -483,7 +760,8 @@ struct GraphPass : public PassInfoMixin<GraphPass> {
 			       << manifest_path << "'\n";
 			manifest.clear_error();
 		}
-		return PreservedAnalyses::all();
+		instrument_runtime_logging(M, stable_ids, runtime_ids);
+		return PreservedAnalyses::none();
 	};
 };
 

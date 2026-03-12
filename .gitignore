@@ -2,3 +2,5 @@
 *.out
 *.so
 *.tsv
+*.o
+*.glog
