@@ -251,6 +251,20 @@ static void emit_manifest_instruction(
 		<< escape_manifest_field(rendered_label) << '\n';
 }
 
+static void emit_manifest_synthetic(
+	raw_ostream &manifest,
+	StableId synthetic_id,
+	StableId owner_instruction_id,
+	NodeId node_id,
+	StringRef rendered_label
+) {
+	manifest << "synthetic\t"
+		<< synthetic_id << '\t'
+		<< owner_instruction_id << '\t'
+		<< node_id << '\t'
+		<< escape_manifest_field(rendered_label) << '\n';
+}
+
 static void emit_manifest_edge(
 	raw_ostream &manifest,
 	StableId edge_id,
@@ -592,7 +606,8 @@ static void process_operand(
 
 	// syntetic value
 
-	NodeId operand_node_id = make_synthetic_node_id(next_synthetic_node_id++);
+	StableId synthetic_id = next_synthetic_node_id++;
+	NodeId operand_node_id = make_synthetic_node_id(synthetic_id);
 	string operandNodeLabel = operand_value->getName().empty()
 		? operand_value->getNameOrAsOperand()
 		: operand_value->getName().str();
@@ -602,6 +617,13 @@ static void process_operand(
 		return;
 	}
 
+	emit_manifest_synthetic(
+		manifest,
+		synthetic_id,
+		instr_id,
+		operand_node_id,
+		operandNodeLabel
+	);
 	emit_synthetic_node(operand_node_id, operandNodeLabel);
 	emit_data_edge(operand_node_id, instr_node_id, operand_label);
 }

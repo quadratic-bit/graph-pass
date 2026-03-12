@@ -4,3 +4,4 @@
 *.tsv
 *.o
 *.glog
+*.dot
