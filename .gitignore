@@ -5,3 +5,5 @@
 *.o
 *.glog
 *.dot
+
+out
