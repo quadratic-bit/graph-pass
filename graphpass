@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+
+def die(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def sanitize_name(name: str) -> str:
+    name = re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_")
+    if not name:
+        name = "run"
+    if not re.match(r"[A-Za-z_]", name[0]):
+        name = "run_" + name
+    return name
+
+
+def derive_name_from_source(source: Path) -> str:
+    basename = source.name
+    match = re.search(r"[A-Za-z0-9]+", basename)
+    token = match.group(0) if match else "run"
+    token = sanitize_name(token)
+
+    data = source.read_bytes()
+    short_hash = hashlib.sha256(data).hexdigest()[:8]
+    return f"{token}_{short_hash}"
+
+
+def run_checked(cmd, *, env=None, stdout=None):
+    subprocess.run(cmd, check=True, env=env, stdout=stdout)
+
+
+def is_stale(output: Path, deps) -> bool:
+    if not output.exists():
+        return True
+    out_mtime = output.stat().st_mtime
+    return any(dep.stat().st_mtime > out_mtime for dep in deps if dep.exists())
+
+
+def llvm_include_dir(llvm_config: str) -> str:
+    result = subprocess.run(
+        [llvm_config, "--includedir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def build_support(args) -> tuple[Path, Path]:
+    root = project_root()
+    build_dir = root / "out" / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    pass_so = build_dir / "graphPass.so"
+    rt_obj = build_dir / "graphpass_rt.o"
+
+    graphpass_dir = root / "graphpass"
+    pass_sources = sorted(graphpass_dir.glob("*.cpp"))
+    pass_headers = sorted(graphpass_dir.glob("*.hpp"))
+    pass_deps = pass_sources + pass_headers
+
+    if is_stale(pass_so, pass_deps):
+        include_dir = llvm_include_dir(args.llvm_config)
+        cmd = [
+            args.cxx,
+            "-fPIC",
+            "-shared",
+            "-I",
+            str(root),
+            "-I",
+            include_dir,
+            *[str(p) for p in pass_sources],
+            "-o",
+            str(pass_so),
+        ]
+        run_checked(cmd)
+
+    rt_src = root / "graphpass_rt.c"
+    if is_stale(rt_obj, [rt_src]):
+        cmd = [args.cc, "-c", str(rt_src), "-O2", "-o", str(rt_obj)]
+        run_checked(cmd)
+
+    return pass_so, rt_obj
+
+
+def bundle_paths(name: str, out_root: Path) -> dict:
+    bundle = out_root / name
+    bundle.mkdir(parents=True, exist_ok=True)
+
+    return {
+        "name": name,
+        "bundle_dir": bundle.resolve(),
+        "binary": (bundle / f"{name}.out").resolve(),
+        "dot": (bundle / f"{name}.dot").resolve(),
+        "manifest": (bundle / f"{name}.manifest.tsv").resolve(),
+        "glog": (bundle / f"{name}.glog").resolve(),
+        "runtime_dot": (bundle / f"{name}.runtime.dot").resolve(),
+        "run_json": (bundle / "run.json").resolve(),
+    }
+
+
+def write_run_json(meta: dict) -> None:
+    with open(meta["run_json"], "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "name": meta["name"],
+                "source": str(meta["source"]),
+                "bundle_dir": str(meta["bundle_dir"]),
+                "binary": str(meta["binary"]),
+                "dot": str(meta["dot"]),
+                "manifest": str(meta["manifest"]),
+                "glog": str(meta["glog"]),
+                "runtime_dot": str(meta["runtime_dot"]),
+                "opt": meta["opt"],
+                "compiler": meta["compiler"],
+                "compiler_args": meta["compiler_args"],
+            },
+            f,
+            indent=2,
+        )
+
+
+def load_run_json(bundle_or_json: str) -> dict:
+    path = Path(bundle_or_json).resolve()
+    run_json = path / "run.json" if path.is_dir() else path
+    with open(run_json, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def cmd_compile(args):
+    root = project_root()
+    source = Path(args.source).resolve()
+    if not source.exists():
+        die(f"source file not found: {source}")
+
+    pass_so, rt_obj = build_support(args)
+
+    name = sanitize_name(args.name) if args.name else derive_name_from_source(source)
+    out_root = Path(args.out_root).resolve()
+    paths = bundle_paths(name, out_root)
+
+    env = os.environ.copy()
+    env["GRAPH_PASS_NAME"] = name
+    env["GRAPH_PASS_MANIFEST"] = str(paths["manifest"])
+
+    compiler_args = list(args.cflag)
+    cmd = [
+        args.cc,
+        f"-fpass-plugin={pass_so}",
+        str(source),
+        str(rt_obj),
+        args.opt,
+        "-o",
+        str(paths["binary"]),
+        *compiler_args,
+    ]
+
+    with open(paths["dot"], "w", encoding="utf-8") as dotf:
+        run_checked(cmd, env=env, stdout=dotf)
+
+    if not paths["manifest"].exists():
+        die(f"manifest was not produced: {paths['manifest']}")
+
+    meta = {
+        **paths,
+        "source": source,
+        "opt": args.opt,
+        "compiler": args.cc,
+        "compiler_args": compiler_args,
+    }
+    write_run_json(meta)
+
+    print(paths["bundle_dir"])
+
+
+def cmd_run(args):
+    meta = load_run_json(args.bundle)
+
+    glog = Path(meta["glog"])
+    binary = Path(meta["binary"])
+
+    if glog.exists():
+        glog.unlink()
+
+    env = os.environ.copy()
+    env["GRAPH_PASS_LOG"] = str(glog)
+
+    program_args = list(args.program_args)
+    if program_args and program_args[0] == "--":
+        program_args = program_args[1:]
+
+    run_checked([str(binary), *program_args], env=env)
+
+
+def cmd_enrich(args):
+    root = project_root()
+    meta = load_run_json(args.bundle)
+
+    run_json_or_bundle = str(Path(meta["bundle_dir"]))
+    runtime_dot = Path(meta["runtime_dot"])
+
+    with open(runtime_dot, "w", encoding="utf-8") as outf:
+        run_checked([sys.executable, str(root / "enrich_graph.py"), run_json_or_bundle], stdout=outf)
+
+
+def cmd_trace(args):
+    compile_args = argparse.Namespace(
+        source=args.source,
+        name=args.name,
+        out_root=args.out_root,
+        cc=args.cc,
+        cxx=args.cxx,
+        llvm_config=args.llvm_config,
+        opt=args.opt,
+        cflag=args.cflag,
+    )
+    cmd_compile(compile_args)
+
+    source = Path(args.source).resolve()
+    name = sanitize_name(args.name) if args.name else derive_name_from_source(source)
+    bundle = str((Path(args.out_root).resolve() / name))
+
+    run_args = argparse.Namespace(bundle=bundle, program_args=args.program_args)
+    enrich_args = argparse.Namespace(bundle=bundle)
+
+    cmd_run(run_args)
+    cmd_enrich(enrich_args)
+
+    print(bundle)
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="graphpass")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    common_compile = argparse.ArgumentParser(add_help=False)
+    common_compile.add_argument("source")
+    common_compile.add_argument("--name")
+    common_compile.add_argument("--out-root", default=str(project_root() / "out"))
+    common_compile.add_argument("--cc", default="clang")
+    common_compile.add_argument("--cxx", default="clang++")
+    common_compile.add_argument("--llvm-config", default="llvm-config")
+    common_compile.add_argument("--opt", default="-O1")
+    common_compile.add_argument("--cflag", action="append", default=[])
+
+    p_compile = sub.add_parser("compile", parents=[common_compile])
+    p_compile.set_defaults(func=cmd_compile)
+
+    p_run = sub.add_parser("run")
+    p_run.add_argument("bundle")
+    p_run.add_argument("program_args", nargs=argparse.REMAINDER)
+    p_run.set_defaults(func=cmd_run)
+
+    p_enrich = sub.add_parser("enrich")
+    p_enrich.add_argument("bundle")
+    p_enrich.set_defaults(func=cmd_enrich)
+
+    p_trace = sub.add_parser("trace", parents=[common_compile])
+    p_trace.add_argument("program_args", nargs=argparse.REMAINDER)
+    p_trace.set_defaults(func=cmd_trace)
+
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

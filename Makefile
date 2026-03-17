@@ -15,11 +15,12 @@ PASS_SO := $(BUILD_DIR)/graphPass.so
 RT_OBJ  := $(BUILD_DIR)/graphpass_rt.o
 
 GRAPH_PASS_SRCS := \
-	graphpass/pass.cpp \
-	graphpass/ids.cpp \
-	graphpass/manifest.cpp \
-	graphpass/instrumentation.cpp \
-	graphpass/render.cpp
+	src/pass.cpp \
+	src/ids.cpp \
+	src/manifest.cpp \
+	src/instrumentation.cpp \
+	src/config.cpp \
+	src/render.cpp
 
 BIN         := $(OUT_DIR)/$(EXAMPLE).out
 DOT         := $(OUT_DIR)/$(EXAMPLE).dot
@@ -47,7 +48,7 @@ rerun: run enrich
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(PASS_SO): $(GRAPH_PASS_SRCS) graphpass/common.hpp graphpass/ids.hpp graphpass/manifest.hpp graphpass/instrumentation.hpp graphpass/render.hpp | $(BUILD_DIR)
+$(PASS_SO): $(GRAPH_PASS_SRCS) src/common.hpp src/config.hpp src/ids.hpp src/manifest.hpp src/instrumentation.hpp src/render.hpp | $(BUILD_DIR)
 	$(CLANGXX) -fPIC -shared -I. -I$$($(LLVM_CONFIG) --includedir) $(GRAPH_PASS_SRCS) -o $(PASS_SO)
 
 $(RT_OBJ): graphpass_rt.c | $(BUILD_DIR)

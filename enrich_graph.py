@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-
 import sys
+import json
+from pathlib import Path
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
@@ -368,12 +369,30 @@ def synthetic_colors(visited: bool):
     return DIM_IMM_CLR, DIM_IMM_FILL
 
 
-def main():
-    if len(sys.argv) != 3:
-        die("usage: enrich_graph.py <manifest.tsv> <graphpass.glog>")
+def resolve_manifest_and_glog(argv):
+    if len(argv) == 3:
+        return Path(argv[1]), Path(argv[2])
 
-    manifest_path = sys.argv[1]
-    glog_path = sys.argv[2]
+    if len(argv) == 2:
+        bundle = Path(argv[1])
+
+        if bundle.is_dir():
+            run_json_path = bundle / "run.json"
+        else:
+            run_json_path = bundle
+
+        with open(run_json_path, "r", encoding="utf-8") as f:
+            run_meta = json.load(f)
+
+        return Path(run_meta["manifest"]), Path(run_meta["glog"])
+
+    die("usage: enrich_graph.py <manifest.tsv> <graphpass.glog>\n"
+        "   or: enrich_graph.py <bundle-dir>\n"
+        "   or: enrich_graph.py <run.json>")
+
+
+def main():
+    manifest_path, glog_path = resolve_manifest_and_glog(sys.argv)
 
     (
         module,
@@ -383,9 +402,9 @@ def main():
         synthetics,
         edges,
         cfg_edges,
-    ) = parse_manifest(manifest_path)
+    ) = parse_manifest(str(manifest_path))
 
-    glog_module_id, bb_hits, edge_hits, call_hits, events = parse_glog(glog_path)
+    glog_module_id, bb_hits, edge_hits, call_hits, events = parse_glog(str(glog_path))
 
     if glog_module_id != module.module_id:
         die(
@@ -513,7 +532,7 @@ def main():
             if edge.edge_kind == "seq":
                 print(
                     f'\t\t{NODE_PREFIX}{edge.from_node_id} -> {NODE_PREFIX}{edge.to_node_id} '
-                    f'[{CLR_SEQ and f"color=\"{CLR_SEQ}\""}]'
+                    f'[color="{CLR_SEQ}"]'
                 )
                 continue
 

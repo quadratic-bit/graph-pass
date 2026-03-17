@@ -1,5 +1,9 @@
 #pragma once
 #include <llvm/IR/Module.h>
+#include <llvm/IR/ModuleSlotTracker.h>
+#include <llvm/Support/raw_ostream.h>
+
+#include <string>
 
 #include "ids.hpp"
 

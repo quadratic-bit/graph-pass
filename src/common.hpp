@@ -1,3 +1,4 @@
+#pragma once
 #include <cstdint>
 
 #define FONTNAME "fontname=\"DepartureMono Nerd Font\""
