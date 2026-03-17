@@ -3,15 +3,19 @@ LLVM Pass for GraphViz control-data flow
 
 ### Build
 ```sh
-clang++ graph_pass.cpp -fPIC -shared -I$(llvm-config --includedir) -o graphPass.so
+make build
 ````
 
 ### Run
 
-Compiling with this pass will emit `dot` syntax for the program's flow
+Compiling with this pass will emit `dot` syntax for the program's flow, and
+inject runtime hooks for graph enrichment.
 
 ```sh
-clang -fpass-plugin=./graphPass.so <source_file>
+make graph EXAMPLE=fact OPT=-O1
+make run EXAMPLE=fact ARGS=10
+make enrich EXAMPLE=fact
+xdot ./out/fact/fact.runtime.dot
 ```
 
 ### Examples
