@@ -14,10 +14,17 @@ OUT_DIR   := out/$(EXAMPLE)
 PASS_SO := $(BUILD_DIR)/graphPass.so
 RT_OBJ  := $(BUILD_DIR)/graphpass_rt.o
 
-BIN      := $(OUT_DIR)/$(EXAMPLE).out
-DOT      := $(OUT_DIR)/$(EXAMPLE).dot
-GLOG     := $(OUT_DIR)/$(EXAMPLE).glog
-MANIFEST := $(OUT_DIR)/$(EXAMPLE)_c.manifest.tsv
+GRAPH_PASS_SRCS := \
+	graphpass/pass.cpp \
+	graphpass/ids.cpp \
+	graphpass/manifest.cpp \
+	graphpass/instrumentation.cpp \
+	graphpass/render.cpp
+
+BIN         := $(OUT_DIR)/$(EXAMPLE).out
+DOT         := $(OUT_DIR)/$(EXAMPLE).dot
+GLOG        := $(OUT_DIR)/$(EXAMPLE).glog
+MANIFEST    := $(EXAMPLE)_c.manifest.tsv
 RUNTIME_DOT := $(OUT_DIR)/$(EXAMPLE).runtime.dot
 
 .PHONY: build graph run enrich rerun clean
@@ -27,7 +34,6 @@ build: $(PASS_SO) $(RT_OBJ)
 graph: build
 	mkdir -p $(OUT_DIR)
 	$(CLANG) -fpass-plugin=./$(PASS_SO) $(SRC) $(RT_OBJ) $(OPT) -o $(BIN) > $(DOT)
-	@if [ -f $(EXAMPLE)_c.manifest.tsv ]; then mv -f $(EXAMPLE)_c.manifest.tsv $(MANIFEST); fi
 
 run: graph
 	GRAPH_PASS_LOG=$(GLOG) ./$(BIN) $(ARGS)
@@ -41,8 +47,8 @@ rerun: run enrich
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(PASS_SO): graph_pass.cpp | $(BUILD_DIR)
-	$(CLANGXX) graph_pass.cpp -fPIC -shared -I$$($(LLVM_CONFIG) --includedir) -o $(PASS_SO)
+$(PASS_SO): $(GRAPH_PASS_SRCS) graphpass/common.hpp graphpass/ids.hpp graphpass/manifest.hpp graphpass/instrumentation.hpp graphpass/render.hpp | $(BUILD_DIR)
+	$(CLANGXX) -fPIC -shared -I. -I$$($(LLVM_CONFIG) --includedir) $(GRAPH_PASS_SRCS) -o $(PASS_SO)
 
 $(RT_OBJ): graphpass_rt.c | $(BUILD_DIR)
 	$(CLANG) -c graphpass_rt.c -O2 -o $(RT_OBJ)
