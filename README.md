@@ -27,10 +27,10 @@ clang -fpass-plugin=./graphPass.so <source_file>
   </tr>
   <tr>
     <td align="center" valign="top">
-      <code>clang -fpass-plugin=./graphPass.so c_examples/hello.c -O0 | dot</code>
+      <code>clang -fpass-plugin=./graphPass.so examples/hello.c -O0 | dot</code>
     </td>
     <td align="center" valign="top">
-      <code>clang -fpass-plugin=./graphPass.so c_examples/fact.c -O1 | dot</code>
+      <code>clang -fpass-plugin=./graphPass.so examples/fact.c -O1 | dot</code>
     </td>
   </tr>
 </table>
