@@ -52,6 +52,38 @@ static void emit_cluster_end(unsigned short indentation) {
 	outs() << "}\n";
 }
 
+static void emit_cfg_edges(
+	ManifestWriter &manifest,
+	BasicBlock &B,
+	const StableIds  &stable_ids,
+	const RuntimeIds &runtime_ids
+) {
+	Instruction *terminator = B.getTerminator();
+	if (!terminator) return;
+
+	StableId from_bblock_id = stable_ids.bblock_id(&B);
+	StableId from_instr_id  = stable_ids.instruction_id(terminator);
+	NodeId   from_node_id   = make_instr_node_id(from_instr_id);
+
+	for (unsigned i = 0; i < terminator->getNumSuccessors(); ++i) {
+		BasicBlock *successor = terminator->getSuccessor(i);
+
+		StableId to_bblock_id = stable_ids.bblock_id(successor);
+		StableId to_instr_id  = stable_ids.instruction_id(&successor->front());
+		NodeId to_node_id     = make_instr_node_id(to_instr_id);
+
+		manifest.write(CfgEdgeRecord{
+			runtime_ids.cfg_edge_id(&B, successor),
+			from_bblock_id,
+			to_bblock_id,
+			from_instr_id,
+			to_instr_id,
+			from_node_id,
+			to_node_id,
+		});
+	}
+}
+
 static string format_call_args(const vector<string> &args) {
 	string result = "(";
 	for (size_t idx = 0; idx < args.size(); ++idx) {
@@ -76,7 +108,7 @@ static void process_operand(
 		NodeId instr_node_id,
 		bool is_call,
 		ModuleSlotTracker &slot_tracker,
-		raw_ostream &manifest,
+		ManifestWriter &manifest,
 		const StableIds &stable_ids,
 		StableId &next_edge_id,
 		StableId &next_synthetic_node_id,
@@ -95,15 +127,14 @@ static void process_operand(
 		NodeId target_node_id = make_instr_node_id(target_instr_id);
 
 		emit_block_edge(instr_node_id, target_node_id);
-		emit_manifest_edge(
-			manifest,
+		manifest.write(EdgeRecord{
 			next_edge_id++,
-			"block",
 			instr_id,
 			target_instr_id,
 			instr_node_id,
-			target_node_id
-		);
+			target_node_id,
+			"block",
+		});
 		return;
 	}
 
@@ -113,15 +144,14 @@ static void process_operand(
 
 		call_args.push_back(operand_label);
 		emit_data_edge(source_node_id, instr_node_id, operand_label);
-		emit_manifest_edge(
-			manifest,
+		manifest.write(EdgeRecord{
 			next_edge_id++,
-			"data",
 			source_instr_id,
 			instr_id,
 			source_node_id,
-			instr_node_id
-		);
+			instr_node_id,
+			"data",
+		});
 		return;
 	}
 
@@ -140,13 +170,12 @@ static void process_operand(
 		return;
 	}
 
-	emit_manifest_synthetic(
-		manifest,
+	manifest.write(SyntheticRecord{
 		synthetic_id,
 		instr_id,
 		operand_node_id,
-		operandNodeLabel
-	);
+		operandNodeLabel,
+	});
 	emit_synthetic_node(operand_node_id, operandNodeLabel);
 	emit_data_edge(operand_node_id, instr_node_id, operand_label);
 }
@@ -155,7 +184,7 @@ static NodeId emit_instruction(
 	Instruction &I,
 	StableId bblock_id,
 	ModuleSlotTracker &slot_tracker,
-	raw_ostream &manifest,
+	ManifestWriter &manifest,
 	const StableIds &stable_ids,
 	StableId &next_edge_id,
 	StableId &next_synthetic_node_id
@@ -194,27 +223,25 @@ static NodeId emit_instruction(
 	if (is_call) instruction_label += format_call_args(call_args);
 
 	emit_instr_node(instr_node_id, instruction_label);
-	emit_manifest_instruction(
-		manifest,
+	manifest.write(InstructionRecord{
 		instr_id,
 		bblock_id,
 		instr_node_id,
 		I.getOpcodeName(),
-		instruction_label
-	);
+		instruction_label,
+	});
 	if (next_node_id) {
 		StableId next_instr_id = stable_ids.instruction_id(next_instr);
 
 		emit_sequence_edge(instr_node_id, next_node_id);
-		emit_manifest_edge(
-			manifest,
+		manifest.write(EdgeRecord{
 			next_edge_id++,
-			"seq",
 			instr_id,
 			next_instr_id,
 			instr_node_id,
-			next_node_id
-		);
+			next_node_id,
+			"seq",
+		});
 	}
 	return instr_node_id;
 }
@@ -237,22 +264,25 @@ void emit_graph_and_manifest(
 		const StableIds &stable_ids,
 		const RuntimeIds &runtime_ids
 ) {
+	ManifestWriter manifest_writer(manifest);
+
 	StableId next_edge_id = 1;
 	StableId next_synthetic_node_id = 1;
 
 	outs() << "digraph " << filename << " {\n\trankdir=TB;\n\tdpi=300\n\tnode [shape=box];\n\tlabel=\"" << source_path << "\"\n\t" FONTNAME "\n";
-	emit_manifest_header(manifest, runtime_ids.module_id, filename, source_path);
+
+	manifest_writer.write(ModuleRecord{runtime_ids.module_id, filename, source_path});
+
 	for (auto &F : M) {
 		slot_tracker.incorporateFunction(F);
 		outs() << '\n';
 
 		StableId function_id = stable_ids.function_id(&F);
-		emit_manifest_function(
-			manifest,
+		manifest_writer.write(FunctionRecord{
 			function_id,
 			make_function_cluster_id(function_id),
-			F.getName()
-		);
+			F.getName(),
+		});
 		emit_function_cluster_begin(F, function_id);
 		for (auto &B : F) {
 			StableId bblock_id = stable_ids.bblock_id(&B);
@@ -260,15 +290,14 @@ void emit_graph_and_manifest(
 				? 0
 				: stable_ids.instruction_id(&B.front());
 
-			emit_manifest_bblock(
-				manifest,
+			manifest_writer.write(BasicBlockRecord{
 				bblock_id,
 				function_id,
 				make_bblock_cluster_id(bblock_id),
 				entry_instr_id,
-				B.getName()
-			);
-			emit_manifest_cfg_edges(manifest, B, stable_ids, runtime_ids);
+				B.getName(),
+			});
+			emit_cfg_edges(manifest_writer, B, stable_ids, runtime_ids);
 
 			vector<NodeId> bblock_node_ids;
 			for (auto &I : B) {
@@ -276,7 +305,7 @@ void emit_graph_and_manifest(
 					I,
 					bblock_id,
 					slot_tracker,
-					manifest,
+					manifest_writer,
 					stable_ids,
 					next_edge_id,
 					next_synthetic_node_id
