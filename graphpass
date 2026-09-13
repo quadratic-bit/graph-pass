@@ -42,56 +42,19 @@ def run_checked(cmd, *, env=None, stdout=None):
     subprocess.run(cmd, check=True, env=env, stdout=stdout)
 
 
-def is_stale(output: Path, deps) -> bool:
-    if not output.exists():
-        return True
-    out_mtime = output.stat().st_mtime
-    return any(dep.stat().st_mtime > out_mtime for dep in deps if dep.exists())
-
-
-def llvm_include_dir(llvm_config: str) -> str:
-    result = subprocess.run(
-        [llvm_config, "--includedir"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
-
-
 def build_support(args) -> tuple[Path, Path]:
     root = project_root()
+
+    run_checked([ "make", "-C", str(root), "build",
+          f"CLANG={args.cc}",
+          f"CLANGXX={args.cxx}",
+          f"LLVM_CONFIG={args.llvm_config}" ]
+    )
+
     build_dir = root / "out" / "build"
-    build_dir.mkdir(parents=True, exist_ok=True)
 
     pass_so = build_dir / "graphPass.so"
-    rt_obj = build_dir / "graphpass_rt.o"
-
-    graphpass_dir = root / "graphpass"
-    pass_sources = sorted(graphpass_dir.glob("*.cpp"))
-    pass_headers = sorted(graphpass_dir.glob("*.hpp"))
-    pass_deps = pass_sources + pass_headers
-
-    if is_stale(pass_so, pass_deps):
-        include_dir = llvm_include_dir(args.llvm_config)
-        cmd = [
-            args.cxx,
-            "-fPIC",
-            "-shared",
-            "-I",
-            str(root),
-            "-I",
-            include_dir,
-            *[str(p) for p in pass_sources],
-            "-o",
-            str(pass_so),
-        ]
-        run_checked(cmd)
-
-    rt_src = root / "graphpass_rt.c"
-    if is_stale(rt_obj, [rt_src]):
-        cmd = [args.cc, "-c", str(rt_src), "-O2", "-o", str(rt_obj)]
-        run_checked(cmd)
+    rt_obj  = build_dir / "graphpass_rt.o"
 
     return pass_so, rt_obj
 
@@ -141,7 +104,6 @@ def load_run_json(bundle_or_json: str) -> dict:
 
 
 def cmd_compile(args):
-    root = project_root()
     source = Path(args.source).resolve()
     if not source.exists():
         die(f"source file not found: {source}")
