@@ -1,9 +1,24 @@
 LLVM Pass for GraphViz control-data flow
 ----------------------------------------
 
+### Requirements
+GraphPass currently targets LLVM 22. Required packages:
+- LLVM 22 development headers and `llvm-config`
+- Clang/Clang++ 22
+- GNU Make
+- Python 3
+
 ### Build
 ```sh
 make build
+````
+
+On distributions with version-suffixed binaries, you may override versions:
+```sh
+make build \
+    CLANG=clang-22 \
+    CLANGXX=clang++-22 \
+    LLVM_CONFIG=llvm-config-22
 ````
 
 ### Trace
