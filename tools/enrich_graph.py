@@ -391,6 +391,110 @@ def resolve_manifest_and_glog(argv):
         "   or: enrich_graph.py <run.json>")
 
 
+def emit_legend() -> None:
+    print('\tsubgraph cluster_legend {')
+    print('\t\tlabel="Legend";')
+    print('\t\tstyle="rounded";')
+    print('\t\tcolor="#b0b0b0";')
+    print(f'\t\t{FONTNAME};')
+
+    print('\t\t{ rank=same;')
+    print(
+        f'\t\t\tlegend_instr '
+        f'[label="instruction",style=filled,'
+        f'color="{CLR_INSTR}",fillcolor="{FILL_INSTR}",{FONTNAME}];'
+    )
+    print('\t\t}')
+    print('\t\t{ rank=same;')
+    print(
+        f'\t\t\tlegend_synthetic '
+        f'[label="immediate / synthetic",style=filled,'
+        f'color="{CLR_IMM}",fillcolor="{FILL_IMM}",{FONTNAME}];'
+    )
+    print('\t\t}')
+
+    print('\t\t{ rank=same;')
+    print('\t\t\tlegend_data_from [label="",shape=point,width=0.05];')
+    print('\t\t\tlegend_data_to   [label="",shape=point,width=0.05];')
+    print('\t\t}')
+    print(
+        f'\t\tlegend_data_from -> legend_data_to '
+        f'[label="data dependency",style=dashed,'
+        f'color="{CLR_DATA}",{FONTNAME}];'
+    )
+
+    print('\t\t{ rank=same;')
+    print('\t\t\tlegend_seq_from [label="",shape=point,width=0.05];')
+    print('\t\t\tlegend_seq_to   [label="",shape=point,width=0.05];')
+    print('\t\t}')
+    print(
+        f'\t\tlegend_seq_from -> legend_seq_to '
+        f'[label="instruction sequence",'
+        f'color="{CLR_SEQ}",{FONTNAME}];'
+    )
+
+    print('\t\t{ rank=same;')
+    print('\t\t\tlegend_unvisited_from [label="",shape=point,width=0.05];')
+    print('\t\t\tlegend_unvisited_to   [label="",shape=point,width=0.05];')
+    print('\t\t}')
+    print(
+        f'\t\tlegend_unvisited_from -> legend_unvisited_to '
+        f'[label="CFG: not traversed",'
+        f'color="{EDGE_UNVISITED}",penwidth=2,{FONTNAME}];'
+    )
+
+    print('\t\t{ rank=same;')
+    print('\t\t\tlegend_cold_from [label="",shape=point,width=0.05];')
+    print('\t\t\tlegend_cold_to   [label="",shape=point,width=0.05];')
+    print('\t\t}')
+    print(
+        f'\t\tlegend_cold_from -> legend_cold_to '
+        f'[label="CFG: colder",'
+        f'color="{EDGE_COLD}",penwidth=4,{FONTNAME}];'
+    )
+
+    print('\t\t{ rank=same;')
+    print('\t\t\tlegend_hot_from [label="",shape=point,width=0.05];')
+    print('\t\t\tlegend_hot_to   [label="",shape=point,width=0.05];')
+    print('\t\t}')
+    print(
+        f'\t\tlegend_hot_from -> legend_hot_to '
+        f'[label="CFG: hotter",'
+        f'color="{EDGE_HOT}",penwidth=4,{FONTNAME}];'
+    )
+
+    print('\t\t{ rank=same;')
+    print('\t\t\tlegend_thick_from [label="",shape=point,width=0.05];')
+    print('\t\t\tlegend_thick_to   [label="",shape=point,width=0.05];')
+    print('\t\t}')
+    print(
+        f'\t\tlegend_thick_from -> legend_thick_to '
+        f'[label="CFG: higher share",'
+        f'color="{EDGE_COLD}",penwidth=7,{FONTNAME}];'
+    )
+
+    print('\t\t{ rank=same;')
+    print('\t\t\tlegend_thin_from [label="",shape=point,width=0.05];')
+    print('\t\t\tlegend_thin_to   [label="",shape=point,width=0.05];')
+    print('\t\t}')
+    print(
+        f'\t\tlegend_thin_from -> legend_thin_to '
+        f'[label="CFG: lower share",'
+        f'color="{EDGE_COLD}",penwidth=2,{FONTNAME}];'
+    )
+
+    print('\t\tlegend_instr -> legend_synthetic [style=invis,weight=100];')
+    print('\t\tlegend_synthetic -> legend_data_from [style=invis,weight=100];')
+    print('\t\tlegend_data_from -> legend_seq_from [style=invis,weight=100];')
+    print('\t\tlegend_seq_from -> legend_unvisited_from [style=invis,weight=100];')
+    print('\t\tlegend_unvisited_from -> legend_cold_from [style=invis,weight=100];')
+    print('\t\tlegend_cold_from -> legend_hot_from [style=invis,weight=100];')
+    print('\t\tlegend_hot_from -> legend_thick_from [style=invis,weight=100];')
+    print('\t\tlegend_thick_from -> legend_thin_from [style=invis,weight=100];')
+
+    print('\t}')
+
+
 def main():
     manifest_path, glog_path = resolve_manifest_and_glog(sys.argv)
 
@@ -569,6 +673,8 @@ def main():
             print('\t\t}')
 
         print('\t}')
+
+    emit_legend()
 
     print('}')
 

@@ -19,6 +19,67 @@ struct RenderContext {
 	StableId next_synthetic_node_id = 1;
 };
 
+static void emit_legend(RenderContext &ctx) {
+	ctx.dot << R"(
+	subgraph cluster_legend {
+		label="Legend";
+		style="rounded";
+		color="#b0b0b0";
+)";
+
+	ctx.dot << "\t\t" FONTNAME ";\n";
+
+	ctx.dot << "\t\t{ rank=same;\n"
+	        << "\t\t\tlegend_instr "
+	        << "[label=\"instruction\",style=filled,"
+	        << CLR_INSTR << "," << FILL_INSTR << "," << FONTNAME << "];\n"
+	        << "\t\t}\n";
+
+	ctx.dot << "\t\t{ rank=same;\n"
+	        << "\t\t\tlegend_synthetic "
+	        << "[label=\"immediate / synthetic\",style=filled,"
+	        << CLR_IMM << "," << FILL_IMM << "," << FONTNAME << "];\n"
+	        << "\t\t}\n";
+
+	ctx.dot << R"(
+		{ rank=same;
+			legend_data_from [label="",shape=point,width=0.05];
+			legend_data_to   [label="",shape=point,width=0.05];
+		}
+)";
+	ctx.dot << "\t\tlegend_data_from -> legend_data_to "
+	        << "[label=\"data dependency\",style=dashed,"
+	        << CLR_DATA << "," << FONTNAME << "];\n";
+
+	ctx.dot << R"(
+		{ rank=same;
+			legend_seq_from [label="",shape=point,width=0.05];
+			legend_seq_to   [label="",shape=point,width=0.05];
+		}
+)";
+	ctx.dot << "\t\tlegend_seq_from -> legend_seq_to "
+	        << "[label=\"instruction sequence\","
+	        << CLR_SEQ << "," << FONTNAME << "];\n";
+
+	ctx.dot << R"(
+		{ rank=same;
+			legend_cfg_from [label="",shape=point,width=0.05];
+			legend_cfg_to   [label="",shape=point,width=0.05];
+		}
+)";
+	ctx.dot << "\t\tlegend_cfg_from -> legend_cfg_to "
+	        << "[label=\"control-flow edge\",penwidth=4,"
+	        << CLR_SEQ << "," << FONTNAME << "];\n";
+
+	ctx.dot << R"(
+		legend_instr -> legend_synthetic [style=invis,weight=100];
+		legend_synthetic -> legend_data_from [style=invis,weight=100];
+		legend_data_from -> legend_seq_from [style=invis,weight=100];
+		legend_seq_from -> legend_cfg_from [style=invis,weight=100];
+	}
+)";
+}
+
 static void emit_instr_node(raw_ostream &dot, NodeId node_id, StringRef label) {
 	dot << "\t\t" NODE_PREFIX << node_id
 	    << " [label=\"" << label
@@ -242,7 +303,7 @@ void emit_graph_and_manifest(
 	llvm::ModuleSlotTracker &slot_tracker,
 	llvm::raw_ostream &dot,
 	llvm::raw_ostream &manifest,
-	const StableIds &stable_ids,
+	const StableIds  &stable_ids,
 	const RuntimeIds &runtime_ids
 ) {
 	ManifestWriter manifest_writer(manifest);
@@ -298,5 +359,6 @@ void emit_graph_and_manifest(
 		}
 		emit_cluster_end(ctx, 1);
 	}
+	emit_legend(ctx);
 	ctx.dot << "}\n";
 }
