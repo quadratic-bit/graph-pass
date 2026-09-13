@@ -6,4 +6,6 @@
 *.glog
 *.dot
 
+compile_commands.json
+
 out

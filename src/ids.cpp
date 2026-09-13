@@ -1,4 +1,4 @@
-#include "ids.hpp"
+#include <graphpass/ids.hpp>
 
 using namespace llvm;
 

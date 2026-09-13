@@ -1,7 +1,7 @@
-#include <llvm/IR/ModuleSlotTracker.h>
+#include <graphpass/render.hpp>
+#include <graphpass/manifest.hpp>
 
-#include "render.hpp"
-#include "manifest.hpp"
+#include <llvm/IR/ModuleSlotTracker.h>
 
 using namespace llvm;
 using std::string;

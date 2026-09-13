@@ -1,8 +1,8 @@
+#include <graphpass/instrumentation.hpp>
+
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
-
-#include "instrumentation.hpp"
 
 using namespace llvm;
 

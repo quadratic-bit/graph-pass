@@ -3,7 +3,7 @@
 
 #include <unordered_map>
 
-#include "common.hpp"
+#include <graphpass/common.hpp>
 
 struct StableIds {
 	StableId next_function_id = 1;

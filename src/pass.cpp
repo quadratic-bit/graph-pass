@@ -4,10 +4,10 @@
 
 #include <system_error>
 
-#include "config.hpp"
-#include "ids.hpp"
-#include "instrumentation.hpp"
-#include "render.hpp"
+#include <graphpass/config.hpp>
+#include <graphpass/ids.hpp>
+#include <graphpass/instrumentation.hpp>
+#include <graphpass/render.hpp>
 
 using namespace llvm;
 

@@ -5,7 +5,7 @@
 
 #include <string>
 
-#include "ids.hpp"
+#include <graphpass/ids.hpp>
 
 void emit_graph_and_manifest(
 	std::string filename,

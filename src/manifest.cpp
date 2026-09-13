@@ -1,4 +1,4 @@
-#include "manifest.hpp"
+#include <graphpass/manifest.hpp>
 
 using namespace llvm;
 

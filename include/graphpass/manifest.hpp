@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "ids.hpp"
+#include <graphpass/ids.hpp>
 
 std::string escape_manifest_field(llvm::StringRef field);
 

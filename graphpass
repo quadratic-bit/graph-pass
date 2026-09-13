@@ -175,7 +175,10 @@ def cmd_enrich(args):
     runtime_dot = Path(meta["runtime_dot"])
 
     with open(runtime_dot, "w", encoding="utf-8") as outf:
-        run_checked([sys.executable, str(root / "enrich_graph.py"), run_json_or_bundle], stdout=outf)
+        run_checked(
+            [sys.executable, str(root / "tools" / "enrich_graph.py"), run_json_or_bundle],
+            stdout=outf
+        )
 
 
 def cmd_trace(args):

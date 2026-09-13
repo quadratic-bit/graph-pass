@@ -1,7 +1,7 @@
 #pragma once
 #include <llvm/IR/Module.h>
 
-#include "ids.hpp"
+#include <graphpass/ids.hpp>
 
 void instrument_runtime_logging(
 	llvm::Module &M,

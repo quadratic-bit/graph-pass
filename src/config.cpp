@@ -1,4 +1,4 @@
-#include "config.hpp"
+#include <graphpass/config.hpp>
 
 #include <cstdlib>
 #include <filesystem>

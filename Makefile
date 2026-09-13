@@ -11,6 +11,10 @@ ARGS    ?=
 BUILD_DIR := out/build
 OUT_DIR   := out/$(EXAMPLE)
 
+INCLUDE_DIR := include
+RUNTIME_SRC := runtime/graphpass_rt.c
+ENRICH_TOOL := tools/enrich_graph.py
+
 PASS_SO := $(BUILD_DIR)/graphPass.so
 RT_OBJ  := $(BUILD_DIR)/graphpass_rt.o
 
@@ -21,6 +25,14 @@ GRAPH_PASS_SRCS := \
 	src/instrumentation.cpp \
 	src/config.cpp \
 	src/render.cpp
+
+GRAPH_PASS_HEADERS := \
+	include/graphpass/common.hpp \
+	include/graphpass/config.hpp \
+	include/graphpass/ids.hpp \
+	include/graphpass/manifest.hpp \
+	include/graphpass/instrumentation.hpp \
+	include/graphpass/render.hpp
 
 BIN         := $(OUT_DIR)/$(EXAMPLE).out
 DOT         := $(OUT_DIR)/$(EXAMPLE).dot
@@ -41,19 +53,22 @@ run: graph
 
 enrich:
 	mkdir -p $(OUT_DIR)
-	$(PYTHON) enrich_graph.py $(MANIFEST) $(GLOG) > $(RUNTIME_DOT)
+	$(PYTHON) $(ENRICH_TOOL) $(MANIFEST) $(GLOG) > $(RUNTIME_DOT)
 
 rerun: run enrich
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(PASS_SO): $(GRAPH_PASS_SRCS) src/common.hpp src/config.hpp src/ids.hpp src/manifest.hpp src/instrumentation.hpp src/render.hpp | $(BUILD_DIR)
-	$(CLANGXX) -fPIC -shared -I. -I$$($(LLVM_CONFIG) --includedir) $(GRAPH_PASS_SRCS) -o $(PASS_SO)
+$(PASS_SO): $(GRAPH_PASS_SRCS) $(GRAPH_PASS_HEADERS) | $(BUILD_DIR)
+	$(CLANGXX) -fPIC -shared \
+		-I$(INCLUDE_DIR) \
+		-I$$($(LLVM_CONFIG) --includedir) \
+		$(GRAPH_PASS_SRCS) \
+		-o $(PASS_SO)
 
-$(RT_OBJ): graphpass_rt.c | $(BUILD_DIR)
-	$(CLANG) -c graphpass_rt.c -O2 -o $(RT_OBJ)
+$(RT_OBJ): $(RUNTIME_SRC) | $(BUILD_DIR)
+	$(CLANG) -c $(RUNTIME_SRC) -O2 -o $(RT_OBJ)
 
 clean:
 	rm -rf out
-	rm -f *_c.manifest.tsv
