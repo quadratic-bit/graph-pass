@@ -12,7 +12,6 @@ struct RuntimeLoggerFns {
 	FunctionCallee init;
 	FunctionCallee bb;
 	FunctionCallee edge;
-	FunctionCallee call;
 };
 
 static RuntimeLoggerFns declare_runtime_logger_fns(Module &M) {
@@ -23,8 +22,7 @@ static RuntimeLoggerFns declare_runtime_logger_fns(Module &M) {
 	return {
 		M.getOrInsertFunction("__graphpass_log_init", void_ty, i64_ty),
 		M.getOrInsertFunction("__graphpass_log_bb",   void_ty, i64_ty),
-		M.getOrInsertFunction("__graphpass_log_edge", void_ty, i64_ty),
-		M.getOrInsertFunction("__graphpass_log_call", void_ty, i64_ty)
+		M.getOrInsertFunction("__graphpass_log_edge", void_ty, i64_ty)
 	};
 }
 
@@ -35,7 +33,6 @@ static bool is_graphpass_runtime_function(const Function *F) {
 	return name == "__graphpass_log_init"
 		|| name == "__graphpass_log_bb"
 		|| name == "__graphpass_log_edge"
-		|| name == "__graphpass_log_call"
 		|| name == "__graphpass_ctor";
 }
 
@@ -74,27 +71,6 @@ static void instrument_basic_block_entries(
 
 		IRBuilder<> builder(&*insert_it);
 		builder.CreateCall(log_bb, {builder.getInt64(stable_ids.bblock_id(&B))});
-	}
-}
-
-static void instrument_call_sites(
-	Function &F,
-	const StableIds &stable_ids,
-	FunctionCallee log_call
-) {
-	for (auto &B : F) {
-		for (Instruction &I : make_early_inc_range(B)) {
-			auto *CB = dyn_cast<CallBase>(&I);
-			if (!CB) continue;
-
-			if (Function *callee = CB->getCalledFunction()) {
-				if (callee->isIntrinsic()) continue;
-				if (is_graphpass_runtime_function(callee)) continue;
-			}
-
-			IRBuilder<> builder(CB);
-			builder.CreateCall(log_call, {builder.getInt64(stable_ids.instruction_id(&I))});
-		}
 	}
 }
 
@@ -152,7 +128,6 @@ void instrument_runtime_logging(
 		if (is_graphpass_runtime_function(&F)) continue;
 
 		instrument_basic_block_entries(F, stable_ids, logger_fns.bb);
-		instrument_call_sites(F, stable_ids, logger_fns.call);
 		instrument_cfg_edges(F, runtime_ids, logger_fns.edge);
 	}
 }

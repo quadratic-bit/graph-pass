@@ -50,7 +50,7 @@ void __graphpass_log_init(uint64_t module_id) {
 	if (!f) return;
 
 	flockfile(f);
-	fprintf(f, "GLOG\t1\t%" PRIu64 "\n", module_id);
+	fprintf(f, "GLOG\t2\t%" PRIu64 "\n", module_id);
 	funlockfile(f);
 }
 
@@ -60,10 +60,6 @@ void __graphpass_log_bb(uint64_t bblock_id) {
 
 void __graphpass_log_edge(uint64_t edge_id) {
 	glog_write_event("EDGE", edge_id);
-}
-
-void __graphpass_log_call(uint64_t inst_id) {
-	glog_write_event("CALL", inst_id);
 }
 
 __attribute__((destructor))

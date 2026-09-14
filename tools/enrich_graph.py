@@ -291,37 +291,32 @@ def parse_glog(path: str):
         die("empty glog")
 
     hdr = lines[0].split("\t")
-    if len(hdr) != 3 or hdr[0] != "GLOG" or hdr[1] != "1":
+    if len(hdr) != 3 or hdr[0] != "GLOG" or hdr[1] != "2":
         die("invalid glog header")
 
     module_id = int(hdr[2])
+
     bb_hits = Counter()
     edge_hits = Counter()
-    call_hits = Counter()
-    events = []
 
     for line in lines[1:]:
         cols = line.split("\t")
         if len(cols) != 4:
             die(f"bad glog row: {line}")
 
-        seq = int(cols[0])
-        tid = int(cols[1])
+        int(cols[0])  # sequence number
+        int(cols[1])  # thread id
         tag = cols[2]
         ident = int(cols[3])
-
-        events.append((seq, tid, tag, ident))
 
         if tag == "BB":
             bb_hits[ident] += 1
         elif tag == "EDGE":
             edge_hits[ident] += 1
-        elif tag == "CALL":
-            call_hits[ident] += 1
         else:
             die(f"unknown glog tag: {tag}")
 
-    return module_id, bb_hits, edge_hits, call_hits, events
+    return module_id, bb_hits, edge_hits
 
 
 def label_with_count(name: str, count: int) -> str:
@@ -508,7 +503,7 @@ def main():
         cfg_edges,
     ) = parse_manifest(str(manifest_path))
 
-    glog_module_id, bb_hits, edge_hits, call_hits, events = parse_glog(str(glog_path))
+    glog_module_id, bb_hits, edge_hits = parse_glog(str(glog_path))
 
     if glog_module_id != module.module_id:
         die(
@@ -523,12 +518,6 @@ def main():
     for edge_id in edge_hits:
         if edge_id not in cfg_edges:
             die(f"glog references unknown cfg edge id: {edge_id}")
-
-    for inst_id in call_hits:
-        if inst_id not in instructions:
-            die(f"glog references unknown instruction id: {inst_id}")
-        if instructions[inst_id].opcode_name != "call":
-            die(f"CALL references non-call instruction id: {inst_id}")
 
     blocks_by_function = defaultdict(list)
     for row in sorted(bblocks.values(), key=lambda x: x.bblock_id):
