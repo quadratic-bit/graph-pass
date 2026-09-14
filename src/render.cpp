@@ -27,7 +27,7 @@ static void emit_legend(RenderContext &ctx) {
 		color="#b0b0b0";
 )";
 
-	ctx.dot << "\t\t" FONTNAME ";\n";
+	ctx.dot << "\t\t" << FONTNAME << ";\n";
 
 	ctx.dot << "\t\t{ rank=same;\n"
 	        << "\t\t\tlegend_instr "
@@ -83,41 +83,44 @@ static void emit_legend(RenderContext &ctx) {
 static void emit_instr_node(raw_ostream &dot, NodeId node_id, StringRef label) {
 	dot << "\t\t" NODE_PREFIX << node_id
 	    << " [label=\"" << label
-	    << "\",style=filled," CLR_INSTR "," FILL_INSTR "," FONTNAME "];\n";
+	    << "\",style=filled,"
+	    << CLR_INSTR <<  ","
+	    << FILL_INSTR <<  ","
+	    << FONTNAME << "];\n";
 }
 
 static void emit_synthetic_node(raw_ostream &dot, NodeId node_id, StringRef label) {
 	dot << "\t\t" NODE_PREFIX << node_id
 	    << " [label=\"" << label
-	    << "\",style=filled," CLR_IMM "," FILL_IMM "," FONTNAME "];\n";
+	    << "\",style=filled," << CLR_IMM << "," << FILL_IMM << "," << FONTNAME << "];\n";
 }
 
 static void emit_data_edge(raw_ostream &dot, NodeId from, NodeId to, const string &label) {
 	dot << "\t\t" NODE_PREFIX << from << " -> " NODE_PREFIX << to
 	    << " [label=\"" << label
-	    << "\",style=dashed," CLR_DATA "," FONTNAME "]\n";
+	    << "\",style=dashed," << CLR_DATA << "," << FONTNAME << "]\n";
 }
 
 static void emit_sequence_edge(raw_ostream &dot, NodeId from, NodeId to) {
 	dot << "\t\t" NODE_PREFIX << from << " -> " NODE_PREFIX << to
-	    << " [" CLR_SEQ "]\n";
+	    << " [" << CLR_SEQ << "]\n";
 }
 
 static void emit_block_edge(raw_ostream &dot, NodeId from, NodeId to) {
 	dot << "\t\t" NODE_PREFIX << from << " -> " NODE_PREFIX << to
-	    << " [style=solid,penwidth=4," CLR_SEQ "," FONTNAME "]\n";
+	    << " [style=solid,penwidth=4," << CLR_SEQ << "," << FONTNAME << "]\n";
 }
 
 static void emit_function_cluster_begin(RenderContext &ctx, Function &F, StableId function_id) {
 	NodeId cluster_id = make_function_cluster_id(function_id);
 	ctx.dot << "\tsubgraph cluster_" << cluster_id << " {\n\t\tlabel=\""
-	        << F.getName() << "\"\n\t\t" FONTNAME "\n\t\t" CLR_FUNC "\n";
+	        << F.getName() << "\"\n\t\t" << FONTNAME << "\n\t\t" << CLR_FUNC << "\n";
 }
 
 static void emit_bblock_cluster_begin(RenderContext &ctx, BasicBlock &B, StableId bblock_id) {
 	NodeId cluster_id = make_bblock_cluster_id(bblock_id);
 	ctx.dot << "\t\tsubgraph cluster_" << cluster_id << " {\n\t\t\tlabel=\""
-	        << B.getName() << "\"\n\t\t\t" CLR_BBLOCK "\n";
+	        << B.getName() << "\"\n\t\t\t" << CLR_BBLOCK << "\n";
 }
 
 static void emit_cluster_end(RenderContext &ctx, unsigned short indentation) {
@@ -318,7 +321,7 @@ void emit_graph_and_manifest(
 
 	ctx.dot << "digraph " << filename
 	        << " {\n\trankdir=TB;\n\tdpi=300\n\tnode [shape=box];\n\tlabel=\"" << source_path
-	        << "\"\n\t" FONTNAME "\n";
+	        << "\"\n\t" << FONTNAME << "\n";
 
 	ctx.manifest.write(ModuleRecord{ctx.runtime_ids.module_id, filename, source_path});
 

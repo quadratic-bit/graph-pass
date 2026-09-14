@@ -1,21 +1,23 @@
 #pragma once
 #include <cstdint>
+#include <llvm/ADT/StringRef.h>
 
-#define FONTNAME "fontname=\"DepartureMono Nerd Font\""
+inline constexpr llvm::StringLiteral FONTNAME = "fontname=\"monospace\"";
+inline constexpr llvm::StringLiteral NODE_PREFIX = "node";
 
 #define NODE_PREFIX "node"
 
-#define CLR_INSTR "color=\"#4865a3\""
-#define CLR_IMM   "color=\"#3b7741\""
+inline constexpr llvm::StringLiteral CLR_INSTR = "color=\"#4865a3\"";
+inline constexpr llvm::StringLiteral CLR_IMM   = "color=\"#3b7741\"";
 
-#define FILL_INSTR "fillcolor=\"#80a0e2\""
-#define FILL_IMM   "fillcolor=\"#75b279\""
+inline constexpr llvm::StringLiteral FILL_INSTR = "fillcolor=\"#80a0e2\"";
+inline constexpr llvm::StringLiteral FILL_IMM   = "fillcolor=\"#75b279\"";
 
-#define CLR_DATA "color=\"#000000\""
-#define CLR_SEQ  "color=\"#d96a65\""
+inline constexpr llvm::StringLiteral CLR_DATA = "color=\"#000000\"";
+inline constexpr llvm::StringLiteral CLR_SEQ  = "color=\"#d96a65\"";
 
-#define CLR_FUNC   "bgcolor=\"#f0f0f0\""
-#define CLR_BBLOCK "bgcolor=\"#e0e0e0\""
+inline constexpr llvm::StringLiteral CLR_FUNC   = "bgcolor=\"#f0f0f0\"";
+inline constexpr llvm::StringLiteral CLR_BBLOCK = "bgcolor=\"#e0e0e0\"";
 
 using NodeId   = uintptr_t;
 using StableId = uint64_t;

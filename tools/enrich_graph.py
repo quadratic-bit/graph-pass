@@ -6,36 +6,36 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 
-FONTNAME = 'fontname="DepartureMono Nerd Font"'
+FONTNAME = 'fontname="monospace"'
 NODE_PREFIX = "node"
 
-CLR_INSTR = "#4865a3"
+CLR_INSTR  = "#4865a3"
 FILL_INSTR = "#80a0e2"
 
-CLR_IMM = "#3b7741"
+CLR_IMM  = "#3b7741"
 FILL_IMM = "#75b279"
 
 CLR_DATA = "#000000"
-CLR_SEQ = "#000000"
+CLR_SEQ  = "#d96a65"
 
-CLR_FUNC = "#f0f0f0"
+CLR_FUNC   = "#f0f0f0"
 CLR_BBLOCK = "#e0e0e0"
 
-DIM_FUNC = "#e3e3e3"
+DIM_FUNC   = "#e3e3e3"
 DIM_BBLOCK = "#f1f1f1"
 
-DIM_INSTR_CLR = "#8997b5"
+DIM_INSTR_CLR  = "#8997b5"
 DIM_INSTR_FILL = "#cfd7ea"
 
-DIM_IMM_CLR = "#7f967f"
+DIM_IMM_CLR  = "#7f967f"
 DIM_IMM_FILL = "#d3dfd3"
 
 EDGE_UNVISITED = "#a9a9a9"
-EDGE_COLD = "#5b8cff"
-EDGE_HOT = "#d96a65"
+EDGE_COLD      = "#5b8cff"
+EDGE_HOT       = "#d96a65"
 
 FUNC_COLD = "#d7e7ff"
-FUNC_HOT = "#ffd4d0"
+FUNC_HOT  = "#ffd4d0"
 
 
 @dataclass
