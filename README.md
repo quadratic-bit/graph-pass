@@ -2,16 +2,23 @@ LLVM Pass for GraphViz control-data flow
 ----------------------------------------
 
 ### Requirements
-GraphPass currently targets LLVM 22. Required packages:
+
+GraphPass currently targets LLVM 22.
+
+Required:
 - LLVM 22 development headers and `llvm-config`
 - Clang/Clang++ 22
 - GNU Make
 - Python 3
 
+Optional:
+- Graphviz (`dot`) for rendering generated graphs
+- `xdot` for interactive graph viewing
+
 ### Build
 ```sh
 make build
-````
+```
 
 On distributions with version-suffixed binaries, you may override versions:
 ```sh
@@ -19,28 +26,33 @@ make build \
     CLANG=clang-22 \
     CLANGXX=clang++-22 \
     LLVM_CONFIG=llvm-config-22
-````
+```
 
 ### Trace
 
-Compiling with this pass emits `dot` syntax for the program's flow and injects
-runtime hooks for graph enrichment.
+
+GraphPass emits a static control/data-flow graph while compiling the program,
+instruments the resulting binary, records its execution, and produces a
+runtime-enriched `dot` graph.
 
 One-shot flow:
 
 ```sh
-./graphpass trace --name fact examples/fact.c -- 10
-xdot out/fact/fact.runtime.dot
+./graphpass trace --name fact --opt=-O1 examples/fact.c -- 10
+dot -Tsvg out/fact/fact.runtime.dot -o out/fact/fact.runtime.svg
 ```
 
-Step-by-step flow:
+The equivalent split flow:
 
 ```sh
-./graphpass compile --name fact examples/fact.c
+./graphpass compile --name fact --opt=-O1 examples/fact.c
 ./graphpass run out/fact -- 10
 ./graphpass enrich out/fact
-xdot out/fact/fact.runtime.dot
+dot -Tsvg out/fact/fact.runtime.dot  -o out/fact/fact.runtime.svg
 ```
+
+`compile` and `trace` build the GraphPass plugin and runtime automatically
+through the project Makefile when necessary.
 
 ### Graph kinds
 
@@ -87,10 +99,10 @@ The runtime-enriched graph keeps the same structure as the static graph and adds
   </tr>
   <tr>
     <td align="center" valign="top">
-      <code>clang -fpass-plugin=./graphPass.so examples/hello.c -O0 | dot</code>
+      <code>./graphpass compile --name hello --opt=-O0 examples/hello.c</code>
     </td>
     <td align="center" valign="top">
-      <code>clang -fpass-plugin=./graphPass.so examples/fact.c -O1 | dot</code>
+      <code>./graphpass compile --name fact --opt=-O1 examples/fact.c</code>
     </td>
   </tr>
 </table>
